@@ -1,61 +1,85 @@
-
-import json
 import os
+import json
 import re
 import datetime
 import subprocess
 import glob
+from dotenv import load_dotenv
 
-def parse_date_from_name(name_str):
-    # Search for pattern: "Mon, 5 Jan 2026, 5:50 PM"
-    # Regex: [DayName], [Day] [Month] [Year], [Time] [AM/PM]
-    # Example match: Mon, 5 Jan 2026, 5:50 PM
+# Load environment variables
+load_dotenv()
+
+def sanitize_filter_name(filter_name):
+    """Sanitize filter name for use in filenames and directories"""
+    import unicodedata
+    normalized = unicodedata.normalize('NFD', filter_name)
+    without_accents = ''.join(char for char in normalized if unicodedata.category(char) != 'Mn')
+    sanitized = ''.join(c if c.isalnum() else '_' for c in without_accents).lower()
+    return sanitized
+
+def extract_timestamp_from_url(video_url):
+    """Extract timestamp from video URL and convert to YYYYMMDDHHMM"""
+    # Video URLs contain timestamp: .../presentation/hash-TIMESTAMP/video/webcams.webm
+    # Example: .../86cbb5c36361c9471658fc29134a603ab1b0ad30-1767646200903/video/
+    match = re.search(r'-(\d{13})/', video_url)
+    if not match:
+        return None
     
-    # We look for the date part specifically
-    match = re.search(r"(\w{3}, \d{1,2} \w{3} \d{4}, \d{1,2}:\d{2} [AP]M)", name_str)
-    if match:
-        date_str = match.group(1)
-        try:
-            # Parse format: "Mon, 5 Jan 2026, 5:50 PM"
-            dt = datetime.datetime.strptime(date_str, "%a, %d %b %Y, %I:%M %p")
-            # Format to: 202601051750
-            return dt.strftime("%Y%m%d%H%M")
-        except ValueError as e:
-            print(f"Error parsing date '{date_str}': {e}")
-            return None
-    return None
+    try:
+        timestamp = int(match.group(1))
+        dt = datetime.datetime.fromtimestamp(timestamp / 1000)  # Convert from milliseconds
+        return dt.strftime("%Y%m%d%H%M")
+    except:
+        return None
 
 def download_videos():
-    # 1. Find latest playback_data file
-    files = glob.glob("playback_data_*.json")
+    """Download videos from playback data"""
+    print("Starting SENCE Video Downloader (Python)...\n")
+    
+    # Get filter from environment
+    bbb_filter = os.getenv('BBB_FILTER', '')
+    
+    # Find playback data files
+    if bbb_filter:
+        safe_name = sanitize_filter_name(bbb_filter)
+        search_pattern = f"scraped_data/{safe_name}/playback_data_*.json"
+        output_dir = f"downloaded_videos/{safe_name}"
+    else:
+        search_pattern = "scraped_data/playback_data_*.json"
+        output_dir = "downloaded_videos"
+    
+    files = glob.glob(search_pattern)
     if not files:
-        print("No playback_data_*.json files found.")
+        print(f"No playback data files found matching: {search_pattern}")
         return
     
     # Get latest file
     latest_file = max(files, key=os.path.getctime)
-    print(f"Propcessing file: {latest_file}")
+    print(f"Processing: {latest_file}")
     
     with open(latest_file, 'r', encoding='utf-8') as f:
         data = json.load(f)
-        
+    
     # Create downloads directory
-    output_dir = "downloaded_videos"
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-        
-    print(f"Found {len(data)} recordings.")
+    os.makedirs(output_dir, exist_ok=True)
+    
+    print(f"Found {len(data)} recordings\n")
+    print(f"Output: {output_dir}\n")
     
     for item in data:
         name = item.get("name", "")
-        # Parse date
-        file_prefix = parse_date_from_name(name)
+        videos = item.get("scraped_content", {}).get("videos", [])
+        
+        if not videos:
+            print(f"⚠ Skipping: No videos for '{name}'")
+            continue
+        
+        # Extract timestamp from first video URL
+        file_prefix = extract_timestamp_from_url(videos[0])
         
         if not file_prefix:
-            print(f"Skipping: Could not parse date from '{name[:30]}...'")
+            print(f"⚠ Skipping: Could not extract timestamp from URL for '{name}'")
             continue
-            
-        videos = item.get("scraped_content", {}).get("videos", [])
         
         for video_url in videos:
             # Determine suffix (webcams vs deskshare)
@@ -65,30 +89,30 @@ def download_videos():
                 suffix = "deskshare"
             else:
                 suffix = "video"
-                
+            
             # Construct filename
             filename = f"{file_prefix}_{suffix}.webm"
             output_path = os.path.join(output_dir, filename)
             
             # Download using wget
             if os.path.exists(output_path):
-                print(f"Skipping {filename} (already exists)")
+                print(f"⏭ {filename} (already exists)")
                 continue
-                
-            print(f"Downloading {filename}...")
+            
+            print(f"⬇ {filename}...")
             try:
-                # Using wget
                 subprocess.run(
                     ["wget", "-q", "--show-progress", "-O", output_path, video_url],
                     check=True
                 )
+                print(f"  ✓")
             except subprocess.CalledProcessError as e:
-                print(f"Failed to download {video_url}: {e}")
+                print(f"  ✗ Failed to download: {e}")
             except FileNotFoundError:
-                print("Error: 'wget' not found. Please install wget or use a different method.")
+                print("  ✗ 'wget' not found. Please install wget.")
                 return
-
-    print(f"\nAll downloads processed. Check '{output_dir}' folder.")
+    
+    print(f"\n✓ Complete. Check '{output_dir}'")
 
 if __name__ == "__main__":
     download_videos()

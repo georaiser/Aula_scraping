@@ -1,127 +1,161 @@
-
+import os
 import time
 import json
-import urllib.parse
-import os
+import glob
+from dotenv import load_dotenv
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
+import auth
+
+# Load environment variables
+load_dotenv()
+
+def sanitize_filter_name(filter_name):
+    """Sanitize filter name for use in filenames and directories"""
+    import unicodedata
+    normalized = unicodedata.normalize('NFD', filter_name)
+    without_accents = ''.join(char for char in normalized if unicodedata.category(char) != 'Mn')
+    sanitized = ''.join(c if c.isalnum() else '_' for c in without_accents).lower()
+    return sanitized
 
 def setup_driver():
+    """Set up Chrome WebDriver"""
     options = Options()
-    options.add_argument("--start-maximized")
-    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_argument("--headless")  # Run headless for playback scraping
+    options.add_argument("--disable-gpu")
+    options.add_argument("--no-sandbox")
+    
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=options)
     return driver
 
-def extract_real_url(wrapper_url):
-    """Extracts the 'href' parameter from the Moodle wrapper URL."""
+def scrape_playback(driver, playback_url):
+    """Scrape video URLs from playback page"""
+    print(f"   Scraping playback: {playback_url[:60]}...")
+    
     try:
-        parsed = urllib.parse.urlparse(wrapper_url)
-        params = urllib.parse.parse_qs(parsed.query)
-        if 'href' in params:
-            return params['href'][0]
-    except:
-        pass
-    return wrapper_url
+        driver.get(playback_url)
+        time.sleep(5)  # Wait for page to load
+        
+        # Find video elements
+        videos = []
+        
+        # Try finding video elements by source tags
+        video_elements = driver.find_elements(By.TAG_NAME, "video")
+        for video in video_elements:
+            sources = video.find_elements(By.TAG_NAME, "source")
+            for source in sources:
+                src = source.get_attribute("src")
+                if src and src.endswith('.webm'):
+                    videos.append(src)
+        
+        # Also check for direct links to videos
+        links = driver.find_elements(By.TAG_NAME, "a")
+        for link in links:
+            href = link.get_attribute("href")
+            if href and ('.webm' in href or 'video' in href):
+                if href not in videos:
+                    videos.append(href)
+        
+        return list(set(videos))  # Remove duplicates
+        
+    except Exception as e:
+        print(f"   ✗ Error scraping playback: {e}")
+        return []
 
-def scrape_playback_content():
-    # 1. Load Session Data
-    input_filename = "session_data.json" 
-    if not os.path.exists(input_filename):
-        print(f"Error: {input_filename} not found. Please run session_scraper.py first.")
-        return
+def load_recordings(bbb_filter=''):
+    """Load recordings from session data"""
+    # Determine search directory
+    if bbb_filter:
+        safe_name = sanitize_filter_name(bbb_filter)
+        search_dir = f"scraped_data/{safe_name}"
+    else:
+        search_dir = "scraped_data"
+    
+    # Find session files
+    session_files = glob.glob(f"{search_dir}/session_*.json")
+    if not session_files:
+        print(f"No session files found in {search_dir}")
+        return []
+    
+    # Load the most recent session file
+    latest_file = max(session_files, key=os.path.getctime)
+    print(f"Loading: {latest_file}")
+    
+    with open(latest_file, 'r', encoding='utf-8') as f:
+        return json.load(f)
 
-    with open(input_filename, "r", encoding="utf-8") as f:
-        session_data = json.load(f)
-
-    recordings = session_data.get("bbb_session", {}).get("recordings", [])
+def main():
+    """Main function"""
+    print("Starting SENCE Playback Scraper (Python)...\n")
+    
+    # Get filter from environment
+    bbb_filter = os.getenv('BBB_FILTER', '')
+    
+    # Load recordings
+    recordings = load_recordings(bbb_filter)
     if not recordings:
-        print("No recordings found in session_data.json.")
+        print("No recordings to process.")
         return
-
-    print(f"Loaded {len(recordings)} recordings from {input_filename}")
-
-    # 2. Setup Driver
+    
+    print(f"Found {len(recordings)} recordings to process\n")
+    
+    # Setup driver
     driver = setup_driver()
     
     try:
-        # 3. Manual Login (Perform once)
-        # Use a generic URL or the first recording link to trigger login
-        first_url = extract_real_url(recordings[0]["playback_link"])
-        print("\n" + "="*60)
-        print("INITIAL NAVIGATION & LOGIN")
-        print(f"Navigating to first link to trigger login: {first_url}")
-        driver.get(first_url)
+        # Process each recording
+        results = []
         
-        print("\nIMPORTANT: PLEASE LOG IN MANUALLY IN THE BROWSER WINDOW.")
-        print("Navigate through the ClaveÚnica process if required.")
-        print("Wait until you are fully logged in.")
-        print("="*60 + "\n")
-        
-        input("Press ENTER here ONLY after you have successfully logged in...")
-
-        # 4. Iterate and Scrape
-        enriched_data = []
-        
-        print(f"\nStarting scrape of {len(recordings)} recordings...")
-        
-        for i, rec in enumerate(recordings):
-            original_link = rec.get("playback_link")
-            name = rec.get("name", "Unknown")
+        for i, recording in enumerate(recordings, 1):
+            print(f"[{i}/{len(recordings)}] {recording.get('name', 'Unknown')[:60]}...")
             
-            if not original_link or original_link == "#":
-                print(f"[{i+1}/{len(recordings)}] Skipping invalid link for '{name}'")
+            playback_link = recording.get('playback_link', '')
+            if not playback_link:
+                print("   ⚠ No playback link")
                 continue
-
-            real_url = extract_real_url(original_link)
-            print(f"[{i+1}/{len(recordings)}] Scaping: {name[:30]}...")
             
-            try:
-                driver.get(real_url)
-                time.sleep(5) # Wait for player to load (videos/svgs)
-                
-                # Scrape Content
-                videos = driver.find_elements(By.TAG_NAME, "video")
-                audios = driver.find_elements(By.TAG_NAME, "audio")
-                svgs = driver.find_elements(By.TAG_NAME, "svg")
-                
-                video_sources = [v.get_attribute('src') for v in videos if v.get_attribute('src')]
-                audio_sources = [a.get_attribute('src') for a in audios if a.get_attribute('src')]
-                
-                # Enrich the record
-                rec["real_playback_url"] = real_url
-                rec["scraped_content"] = {
-                    "videos": video_sources,
-                    "audios": audio_sources,
-                    "slide_count": len(svgs)
-                }
-                
-                enriched_data.append(rec)
-                print(f"    -> Found {len(video_sources)} videos, {len(audio_sources)} audios.")
-                
-            except Exception as e:
-                print(f"    -> Error scraping {real_url}: {e}")
-                rec["error"] = str(e)
-                enriched_data.append(rec)
-
-        # 5. Save Enriched Data
-        timestamp = time.strftime("%Y%m%d-%H%M%S")
-        output_filename = f"playback_data_{timestamp}.json"
+            videos = scrape_playback(driver, playback_link)
+            
+            if videos:
+                print(f"   ✓ Found {len(videos)} video(s)")
+                results.append({
+                    "name": recording['name'],
+                    "playback_link": playback_link,
+                    "scraped_content": {
+                        "videos": videos
+                    }
+                })
+            else:
+                print("   ⚠ No videos found")
         
-        with open(output_filename, "w", encoding="utf-8") as f:
-            json.dump(enriched_data, f, indent=4, ensure_ascii=False)
-            
-        print(f"\nScrape complete. Data saved to {output_filename}")
-
+        # Save results
+        if bbb_filter:
+            safe_name = sanitize_filter_name(bbb_filter)
+            output_dir = f"scraped_data/{safe_name}"
+            os.makedirs(output_dir, exist_ok=True)
+        else:
+            output_dir = "scraped_data"
+            os.makedirs(output_dir, exist_ok=True)
+        
+        timestamp = time.strftime("%Y-%m-%dT%H-%M-%S")
+        filename = f"{output_dir}/playback_data_{timestamp}.json"
+        
+        with open(filename, 'w', encoding='utf-8') as f:
+            json.dump(results, f, indent=2, ensure_ascii=False)
+        
+        print(f"\n✓ Saved {len(results)} playback results to {filename}")
+        
     except Exception as e:
-        print(f"An error occurred: {e}")
+        print(f"\n✗ An error occurred: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
-        print("Closing browser...")
+        print("\nClosing browser...")
         driver.quit()
 
 if __name__ == "__main__":
-    scrape_playback_content()
+    main()

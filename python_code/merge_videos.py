@@ -1,75 +1,113 @@
-
 import os
-import glob
 import subprocess
+import glob
+from dotenv import load_dotenv
 
-def merge_videos():
-    # 1. Scan for files
-    input_dir = "downloaded_videos"
-    output_dir = "merged_videos"
+# Load environment variables
+load_dotenv()
+
+def sanitize_filter_name(filter_name):
+    """Sanitize filter name for use in filenames and directories"""
+    import unicodedata
+    normalized = unicodedata.normalize('NFD', filter_name)
+    without_accents = ''.join(char for char in normalized if unicodedata.category(char) != 'Mn')
+    sanitized = ''.join(c if c.isalnum() else '_' for c in without_accents).lower()
+    return sanitized
+
+def merge_with_ffmpeg(desk_file, webcam_file, output_file):
+    """Merge webcam and deskshare videos using FFmpeg"""
+    print(f"⚙ Merging: {os.path.basename(output_file)}...")
     
-    if not os.path.exists(input_dir):
-        print(f"Error: Directory '{input_dir}' not found. Please run download_videos.py first.")
-        return
-        
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-        
-    # Find all deskshare files as the base
-    deskshare_files = glob.glob(os.path.join(input_dir, "*_deskshare.webm"))
-    
-    print(f"Found {len(deskshare_files)} recording sets.")
-    
-    for desk_file in deskshare_files:
-        # Construct corresponding webcam filename
-        # Pattern: 202601051750_deskshare.webm -> 202601051750_webcams.webm
-        base_name = os.path.basename(desk_file)
-        prefix = base_name.replace("_deskshare.webm", "")
-        
-        webcam_file = os.path.join(input_dir, f"{prefix}_webcams.webm")
-        output_file = os.path.join(output_dir, f"{prefix}_merged.mp4")
-        
-        if not os.path.exists(webcam_file):
-            print(f"Skipping {prefix}: Webcam file not found.")
-            continue
-        
-        if os.path.exists(output_file):
-            print(f"Skipping {prefix}: Output already exists.")
-            continue
-            
-        print(f"Merging {prefix} (Optimized)...")
-        
-        # FFmpeg Command
-        # 1. Output as MP4 (H.264 is faster on CPU than VP9)
-        # 2. Preset 'fast' or 'faster' speeds up encoding significantly
-        # 3. CRF 28 reduces file size (default is 23, higher is smaller)
-        # 4. Scale output to 1280:-2 (720p) to reduce processing pixels
-        
+    try:
+        # FFmpeg command to merge side-by-side
         cmd = [
             "ffmpeg",
-            "-v", "quiet", "-stats",
-            "-i", desk_file, # 0
-            "-i", webcam_file, # 1
-            # Filter: 
-            #  - Scale webcam to 1/5 width
-            #  - Overlay bottom-right
-            #  - Scale ENTIRE output to 1280 width (720p) for speed/size
-            "-filter_complex", "[1]scale=iw/5:-1[pip];[0][pip]overlay=main_w-overlay_w-20:main_h-overlay_h-20[merged];[merged]scale=1280:-2",
-            "-map", "1:a", # Use audio from webcam
-            "-c:v", "libx264", # H.264 is faster
-            "-preset", "fast", # Speed up encoding
-            "-crf", "28", # Smaller size (quality trade-off, 18-28 is good range)
-            "-c:a", "aac", # Standard audio for MP4
+            "-i", desk_file,
+            "-i", webcam_file,
+            "-filter_complex",
+            "[0:v]scale=iw/2:ih[left];[1:v]scale=iw/2:ih[right];[left][right]hstack",
+            "-c:v", "libvpx",
+            "-b:v", "1M",
+            "-c:a", "libvorbis",
+            "-y",  # Overwrite output file
             output_file
         ]
         
-        try:
-            subprocess.run(cmd, check=True)
-            print(f"Success: {output_file}")
-        except subprocess.CalledProcessError as e:
-            print(f"Error merging {prefix}: {e}")
-            
-    print(f"\nMerge complete. Check '{output_dir}' folder.")
+        subprocess.run(cmd, check=True, capture_output=True)
+        print(f"  ✓")
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"  ✗ FFmpeg error: {e.stderr.decode()[:200]}")
+        return False
+    except FileNotFoundError:
+        print("  ✗ FFmpeg not found. Please install ffmpeg.")
+        return False
+
+def merge_videos():
+    """Merge downloaded videos"""
+    print("Starting SENCE Video Merger (Python)...\n")
+    
+    # Get filter from environment
+    bbb_filter = os.getenv('BBB_FILTER', '')
+    
+    # Determine directories
+    if bbb_filter:
+        safe_name = sanitize_filter_name(bbb_filter)
+        input_dir = f"downloaded_videos/{safe_name}"
+        output_dir = f"merged_videos/{safe_name}"
+    else:
+        input_dir = "downloaded_videos"
+        output_dir = "merged_videos"
+    
+    # Check if input directory exists
+    if not os.path.exists(input_dir):
+        print(f"Input directory not found: {input_dir}")
+        return
+    
+    # Create output directory
+    os.makedirs(output_dir, exist_ok=True)
+    
+    print(f"Input: {input_dir}")
+    print(f"Output: {output_dir}\n")
+    
+    # Find all deskshare files
+    deskshare_files = glob.glob(f"{input_dir}/*_deskshare.webm")
+    
+    if not deskshare_files:
+        print("No deskshare videos found to merge.")
+        return
+    
+    print(f"Found {len(deskshare_files)} video pairs to merge\n")
+    
+    merged_count = 0
+    skipped_count = 0
+    
+    for desk_file in deskshare_files:
+        # Get corresponding webcam file
+        prefix = os.path.basename(desk_file).replace('_deskshare.webm', '')
+        webcam_file = os.path.join(input_dir, f"{prefix}_webcams.webm")
+        output_file = os.path.join(output_dir, f"{prefix}_merged.webm")
+        
+        # Check if webcam file exists
+        if not os.path.exists(webcam_file):
+            print(f"⚠ Skipping {prefix} - webcam file not found")
+            skipped_count += 1
+            continue
+        
+        # Check if already merged
+        if os.path.exists(output_file):
+            print(f"⏭ {prefix}_merged.webm (already exists)")
+            skipped_count += 1
+            continue
+        
+        # Merge
+        if merge_with_ffmpeg(desk_file, webcam_file, output_file):
+            merged_count += 1
+    
+    print(f"\n✓ Merged {merged_count} videos")
+    if skipped_count > 0:
+        print(f"  Skipped {skipped_count} videos")
+    print(f"\nCheck '{output_dir}' folder")
 
 if __name__ == "__main__":
     merge_videos()

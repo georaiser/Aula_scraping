@@ -1,91 +1,103 @@
-
+import os
 import time
 import json
+from dotenv import load_dotenv
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
+import auth
+
+# Load environment variables
+load_dotenv()
 
 def setup_driver():
-    """Sets up the Chrome WebDriver."""
+    """Set up Chrome WebDriver"""
     options = Options()
-    # options.add_argument("--headless")  # Commented out to allow manual login
     options.add_argument("--start-maximized")
     options.add_argument("--disable-blink-features=AutomationControlled")
     
-    # Initialize WebDriver
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=options)
     return driver
 
-def scrape_sence_home(initial_url):
+def scrape_home(driver, base_url):
+    """Scrape BigBlueButton modules from home page"""
+    print(f"\nNavigating to: {base_url}")
+    driver.get(base_url)
+    time.sleep(3)
+    
+    print(f"Scraping: {driver.title}")
+    modules = []
+    
+    try:
+        # Find all BBB module links
+        links = driver.find_elements(By.CSS_SELECTOR, "a[href*='mod/bigbluebuttonbn']")
+        
+        print(f"   -> Found {len(links)} BBB modules")
+        
+        for link in links:
+            try:
+                module_name = link.text.strip()
+                module_url = link.get_attribute("href")
+                
+                if module_name and module_url:
+                    modules.append({
+                        "name": module_name,
+                        "url": module_url
+                    })
+                    print(f"   ✓ {module_name}")
+                    
+            except Exception as e:
+                print(f"   ✗ Error processing link: {e}")
+                continue
+        
+    except Exception as e:
+        print(f"   ✗ Error finding modules: {e}")
+    
+    return modules
+
+def main():
+    """Main function"""
+    print("Starting SENCE Home Scraper (Python)...")
+    
+    # Get home URL from environment
+    home_url = os.getenv('HOME_URL', 'https://auladigital.sence.cl/my/')
+    
     driver = setup_driver()
     
     try:
-        print(f"1. Initial Navigation: {initial_url}")
-        driver.get(initial_url)
+        # Navigate to home URL
+        driver.get(home_url)
+        time.sleep(2)
         
-        # --- MANUAL LOGIN STEP ---
-        print("\n" + "="*60)
-        print("IMPORTANT: PLEASE LOG IN MANUALLY IN THE BROWSER WINDOW.")
-        print("Navigate through the ClaveÚnica process if required.")
-        print("Wait until you are fully logged in and see a Course page or Dashboard.")
-        print("DO NOT CLOSE THE BROWSER WINDOW. THE SCRIPT NEEDS IT TO CONTINUE.")
-        print("="*60 + "\n")
+        # Attempt auto-login
+        if not auth.auto_login(driver):
+            print("\n" + "="*60)
+            print("Auto-login failed or no credentials provided.")
+            print("Please log in manually in the browser window.")
+            print("Press ENTER after you have successfully logged in...")
+            print("="*60 + "\n")
+            input()
         
-        input("Press ENTER here ONLY after you have successfully logged in...")
+        # Scrape modules
+        modules = scrape_home(driver, home_url)
         
-        # --- PART A: Scrape Course Home (Current Page after Login) ---
-        current_url = driver.current_url
-        print(f"\n2. Scraping Current Page (Course Home): {current_url}")
+        # Save data
+        filename = "bbb_modules.json"
+        with open(filename, 'w', encoding='utf-8') as f:
+            json.dump(modules, f, indent=2, ensure_ascii=False)
         
-        # This explicitly saves just the Course Home data
-        data = {
-            "course_home": {
-                "url": current_url,
-                "title": driver.title,
-                "content_links": []
-            } # No BBB data here
-        }
-        
-        try:
-            links = driver.find_elements(By.TAG_NAME, "a")
-            for link in links:
-                href = link.get_attribute("href")
-                text = link.text.strip()
-                if href and text:
-                     data["course_home"]["content_links"].append({"text": text, "link": href})
-            
-            print(f"   -> Found {len(data['course_home']['content_links'])} links on course home.")
-            
-        except Exception as e:
-            print(f"   -> Error scraping course home: {e}")
-
-        # --- PART B: BigBlueButton Scraping ---
-        # SKIPPED: This script only scrapes the course home.
-        # Use final_scraper.py for BBB data.
-
-        print(f"\nScrape complete.")
-        
-        # 3. Save Data
-        timestamp = time.strftime("%Y%m%d-%H%M%S")
-        filename = f"sence_home_data_{timestamp}.json"
-        
-        with open(filename, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=4, ensure_ascii=False)
-            
-        print(f"Data saved to {filename}")
+        print(f"\n✓ Saved {len(modules)} modules to {filename}")
         
     except Exception as e:
-        print(f"An error occurred: {e}")
-        
+        print(f"\n✗ An error occurred: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
-        print("Closing browser...")
+        print("\nClosing browser...")
         driver.quit()
 
 if __name__ == "__main__":
-    # The URL to start the login flow (can be anything that triggers login)
-    # The user mentioned the redirect goes to course/view.php?id=5967, but we can start anywhere
-    TARGET_URL = "https://auladigital.sence.cl/mod/bigbluebuttonbn/view.php?id=748489"
-    scrape_sence_home(TARGET_URL)
+    main()
