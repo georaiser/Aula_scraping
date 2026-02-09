@@ -1,7 +1,8 @@
+
 import 'dotenv/config';
 import puppeteer from 'puppeteer';
 import fs from 'fs-extra';
-import { autoLogin } from './auth.js';
+import { autoLogin, saveSession } from './auth.js';
 
 // Configuration
 const CONFIG = {
@@ -118,14 +119,25 @@ async function main() {
         }
         
         const data = await fs.readJson('bbb_modules.json');
-        const modules = (data.modules || []).filter(m => m.text.toLowerCase().includes(filter.toLowerCase()));
+        let modules = (data.modules || []).filter(m => m.text.toLowerCase().includes(filter.toLowerCase()));
         
         if (modules.length === 0) {
             console.error(`No modules matched filter: ${filter}`);
             process.exit(0);
         }
         
-        console.log(`Found ${modules.length} matching modules.`);
+        // Deduplicate by Link
+        const uniqueModules = [];
+        const seenLinks = new Set();
+        for (const m of modules) {
+            if (!seenLinks.has(m.link)) {
+                seenLinks.add(m.link);
+                uniqueModules.push(m);
+            }
+        }
+        modules = uniqueModules;
+        
+        console.log(`Found ${modules.length} matching modules (unique).`);
         
         tasks = modules.map((m, i) => ({
             url: m.link,

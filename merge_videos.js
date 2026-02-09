@@ -1,4 +1,5 @@
 
+import 'dotenv/config'; 
 import fs from 'fs-extra';
 import path from 'path';
 import { spawn } from 'child_process';
@@ -7,8 +8,20 @@ import { glob } from 'glob';
 async function mergeVideos() {
     console.log("Starting SENCE Video Merger (JS)...");
     
-    const inputDir = 'downloaded_videos';
-    const outputDir = 'merged_videos';
+    let inputDir = 'downloaded_videos';
+    let outputDir = 'merged_videos';
+
+    const filter = process.env.BBB_FILTER;
+    if (filter) {
+        // Sanitize: "Módulo 4" -> "Modulo_4"
+        const safeName = filter
+            .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Remove accents
+            .replace(/[^a-z0-9]/gi, '_'); // Replace non-alphanumeric with _
+        
+        inputDir = path.join(inputDir, safeName);
+        outputDir = path.join(outputDir, safeName);
+        console.log(`Using filter-based directories:\n  Input: ${inputDir}\n  Output: ${outputDir}`);
+    }
     
     if (!await fs.pathExists(inputDir)) {
         console.log(`Error: Directory '${inputDir}' not found.`);

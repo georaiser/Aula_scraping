@@ -1,4 +1,32 @@
 import 'dotenv/config';
+import fs from 'fs-extra';
+
+const COOKIE_FILE = 'session_cookies.json';
+
+export async function saveSession(page) {
+    try {
+        const cookies = await page.cookies();
+        await fs.writeJson(COOKIE_FILE, cookies, { spaces: 2 });
+        console.log(`Session cookies saved to ${COOKIE_FILE}`);
+    } catch (e) {
+        console.error("Failed to save session cookies:", e.message);
+    }
+}
+
+async function loadSession(page) {
+    if (!fs.existsSync(COOKIE_FILE)) return false;
+    try {
+        const cookies = await fs.readJson(COOKIE_FILE);
+        if (Array.isArray(cookies) && cookies.length > 0) {
+            await page.setCookie(...cookies);
+            console.log(`Loaded ${cookies.length} session cookies.`);
+            return true;
+        }
+    } catch (e) {
+        console.error("Failed to load session cookies:", e.message);
+    }
+    return false;
+}
 
 export async function autoLogin(page) {
     const run = process.env.RUN ? process.env.RUN.replace(/\./g, '') : '';
@@ -6,7 +34,30 @@ export async function autoLogin(page) {
 
     if (!run || !password) return false;
 
-    console.log("Attempting usage of credentials from .env...");
+    console.log("Checking authentication status...");
+
+    // 1. Try restoring session
+    const cookiesLoaded = await loadSession(page);
+    if (cookiesLoaded) {
+        // Reload to apply cookies if we are already on a page
+        if (page.url() && page.url() !== 'about:blank') {
+            console.log("Refreshing page to apply session...");
+            try {
+                await page.reload({ waitUntil: 'networkidle2', timeout: 30000 });
+            } catch (e) {
+                 console.log("Reload timed out, continuing...");
+            }
+        }
+    }
+    
+    // Check if valid session
+    if (page.url().includes("auladigital.sence.cl") && !page.url().includes("login") && !page.url().includes("claveunica")) {
+          console.log("Already logged in (Session Valid).");
+          // Re-save cookies to keep them fresh? Maybe not needed every time, but good practice.
+          return true;
+    }
+
+    console.log("Session invalid or expired. Attempting usage of credentials from .env...");
     
     try {
         // STEP 1: Check if we are on SENCE Landing (RUT input)
@@ -50,6 +101,7 @@ export async function autoLogin(page) {
             } catch(e) {
                 // If not found, check if we are already logged in or elsewhere
                 if (page.url().includes("auladigital.sence.cl") && !page.url().includes("login")) {
+                    await saveSession(page); // Success! Save cookies
                     return true; 
                 }
                 throw e; // Rethrow to go to catch block
@@ -83,13 +135,18 @@ export async function autoLogin(page) {
                     return false;
                 }
 
+                console.log("Login successful.");
+                await saveSession(page); // SAVE COOKIES
                 return true;
             } else {
                  console.log("ClaveÚnica submit button not found.");
             }
         } catch (e) {
              console.log("ClaveÚnica login attempt failed:", e.message);
-             if (page.url().includes("auladigital.sence.cl")) return true;
+             if (page.url().includes("auladigital.sence.cl")) {
+                 await saveSession(page); // Assume success if redirected back
+                 return true;
+             }
         }
 
     } catch (e) {

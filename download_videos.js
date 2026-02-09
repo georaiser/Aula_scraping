@@ -1,4 +1,5 @@
 
+import 'dotenv/config';
 import fs from 'fs-extra';
 import path from 'path';
 import axios from 'axios';
@@ -73,7 +74,20 @@ async function main() {
     const data = await fs.readJson(latestFile);
     console.log(`Found ${data.length} recordings.`);
     
-    const outputDir = 'downloaded_videos';
+    // Determine Output Folder based on Filter
+    let outputDir = 'downloaded_videos';
+    const filter = process.env.BBB_FILTER;
+    
+    if (filter) {
+        // Sanitize: "Módulo 4" -> "Modulo_4"
+        const safeName = filter
+            .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Remove accents
+            .replace(/[^a-z0-9]/gi, '_'); // Replace non-alphanumeric with _
+        
+        outputDir = path.join(outputDir, safeName);
+        console.log(`Using filter-based output directory: ${outputDir}`);
+    }
+    
     await fs.ensureDir(outputDir);
     
     for (const item of data) {

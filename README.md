@@ -20,9 +20,12 @@ A web scraping and video processing pipeline for SENCE Aula Digital (BigBlueButt
 ### 1. Setup
 
 1.  Install dependencies:
+    ````bash
     ```bash
-    npm install
-    # Installs puppeteer, fs-extra, dotenv, etc.
+    npm install puppeteer fs-extra dotenv axios glob
+    ````
+    ```
+
     ```
 2.  Configure `.env` file:
     ```bash
