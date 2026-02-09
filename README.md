@@ -14,7 +14,9 @@ A web scraping and video processing pipeline for SENCE Aula Digital (BigBlueButt
 
 - **Node.js**: v18+ required
 - **FFmpeg**: Required for video merging
-- **Python 3.7+**: (Optional, for legacy scripts)
+- **Python 3.7+**: (Optional, for Python scripts)
+
+**Windows Users:** See [README_WINDOWS.md](README_WINDOWS.md) for detailed step-by-step installation instructions.
 
 ## Installation
 
@@ -147,10 +149,50 @@ All scripts use emoji indicators for quick visual feedback:
 - ⬇ Downloading
 - 🎬 Merging
 
-## Python Scripts (Legacy)
+## Python Scripts
 
-Legacy Python scripts are available in `python_code/` but do not support auto-login or session persistence.
+Python scripts are available in `python_code/` with full feature parity to Node.js scripts.
+
+### Installation
 
 ```bash
-python python_code/session_scraper.py
+cd python_code
+pip install -r requirements.txt
 ```
+
+### Features
+
+- **Auto-login**: Automatic ClaveÚnica authentication via `.env`
+- **Session Persistence**: Cookie-based session reuse
+- **Module Organization**: Same folder structure as Node.js
+- **URL Timestamps**: Locale-independent filename generation
+
+### Usage
+
+All Python scripts use the same `.env` configuration and workflow as Node.js:
+
+```bash
+# Scrape home page
+python python_code/home_scraper.py
+
+# Scrape sessions
+python python_code/session_scraper.py
+
+# Scrape playback
+python python_code/playback_scraper.py
+
+# Download videos
+python python_code/download_videos.py
+
+# Merge videos
+python python_code/merge_videos.py
+```
+
+**Output Structure:** Same as Node.js - organized by `BBB_FILTER` into `scraped_data/{module}/`, `downloaded_videos/{module}/`, and `merged_videos/{module}/`
+
+## Technology Stack
+
+- **Node.js**: Puppeteer for web automation
+- **Python**: Selenium WebDriver for alternative implementation
+- **FFmpeg**: Video processing and merging
+- **dotenv**: Environment configuration management
