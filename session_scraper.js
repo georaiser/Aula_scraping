@@ -159,8 +159,12 @@ async function main() {
             await scrapeSession(browser, task.url, task.name);
         }
     } finally {
-        console.log("\nClosing browser...");
-        await browser.close();
+        if (process.env.KEEP_OPEN === 'true') {
+            console.log("\nKeeping browser open (KEEP_OPEN=true). Process will not exit automatically.");
+        } else {
+            console.log("\nClosing browser...");
+            await browser.close();
+        }
     }
 }
 
