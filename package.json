@@ -1,0 +1,19 @@
+{
+  "name": "sence-scraper-js",
+  "version": "1.0.0",
+  "description": "SENCE Aula Digital Scraper in JavaScript",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "scrape:session": "node session_scraper.js",
+    "scrape:playback": "node playback_scraper.js",
+    "download": "node download_videos.js",
+    "merge": "node merge_videos.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "dotenv": "^17.2.4",
+    "fs-extra": "^11.2.0",
+    "puppeteer": "^22.0.0"
+  }
+}
