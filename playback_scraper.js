@@ -3,108 +3,56 @@ import puppeteer from 'puppeteer';
 import fs from 'fs-extra';
 import readline from 'readline';
 
-// --- Auto-Login Helper (Same as session_scraper) ---
-async function autoLogin(page) {
-    const run = process.env.RUN;
-    const password = process.env.PASSWORD;
-
-    if (!run || !password) return false;
-
-    console.log("Attempting usage of credentials from .env...");
-    
-    try {
-        // STEP 1: Check if we are on SENCE Landing (RUT input)
-        try {
-            // Selectors based on provided screenshot/description
-            // "Rut Usuario" placeholder or name
-            // User says "input rut, it need an 'enter' to continue with button 'acceder'"
-            const rutSelector = 'input[placeholder*="Rut"], input[id*="rut"], input[name*="rut"]';
-            await page.waitForSelector(rutSelector, { timeout: 5000 });
-            
-            console.log("Found SENCE Landing Page. Entering RUT...");
-            await page.type(rutSelector, run);
-            await page.keyboard.press('Enter'); // User says Enter is needed
-            
-            // Wait for "ACCEDER" button to be clickable or next step
-            // Maybe Enter triggers it, or we need to click it.
-            // "ACCEDER" button
-            const accederBtn = await page.$('button, input[type="submit"], a.btn');
-            // Try to click Acceder if Enter didn't navigate
-            
-            // Wait a sec for UI update
-            await new Promise(r => setTimeout(r, 1000));
-            
-            // If still on same page, try clicking Acceder button containing text "ACCEDER"
-            // Use XPath for text match
-            const btns = await page.$x("//button[contains(., 'ACCEDER')] | //a[contains(., 'ACCEDER')]");
-            if (btns.length > 0) {
-                 console.log("Clicking 'ACCEDER'...");
-                 await Promise.all([
-                    page.waitForNavigation({ waitUntil: 'networkidle2' }),
-                    btns[0].click()
-                 ]);
-            } else {
-                 // Maybe Enter caused navigation?
-                 console.log("No 'ACCEDER' button found or Enter sufficed. Waiting for nav...");
-                 try {
-                    await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 5000 });
-                 } catch (e) {
-                     // check if we are already on ClaveUnica
-                 }
-            }
-            
-        } catch (e) {
-            console.log("SENCE Landing RUT input not found. Checking if already at ClaveÚnica...");
-        }
-
-        // STEP 2: ClaveÚnica Login (If redirected there)
-        try {
-            console.log("Checking for ClaveÚnica login form...");
-            await page.waitForSelector('input[name="run"], input[id="run"]', { timeout: 5000 });
-            
-            console.log("Filling ClaveÚnica credentials...");
-            // Ensure fields are empty or clear them
-            await page.$eval('input[name="run"], input[id="run"]', el => el.value = '');
-            await page.type('input[name="run"], input[id="run"]', run);
-            
-            await page.type('input[name="password"], input[id="password"]', password);
-            
-            const btn = await page.$('button[type="submit"], input[type="submit"], #btn-submit, .btn-primary');
-            if (btn) {
-                await Promise.all([
-                    page.waitForNavigation({ waitUntil: 'networkidle2' }),
-                    btn.click()
-                ]);
-                console.log("ClaveÚnica Login submitted. Waiting for redirection...");
-                return true;
-            }
-        } catch (e) {
-             console.log("ClaveÚnica form not found (or already logged in).");
-             // If we are not on login page, verify if we are logged in?
-             // Checking if we are back at 'auladigital.sence.cl'
-             if (page.url().includes("auladigital.sence.cl")) return true;
-        }
-
-    } catch (e) {
-        console.error("Auto-login failed:", e.message);
-    }
-    return false;
-}
+import { autoLogin } from './auth.js';
 
 async function scrapePlayback() {
   console.log("Starting SENCE Playback Scraper (JS)...");
 
-  // 1. Load Session Data
+  // 1. Load Session Data (find all session_data_*.json files)
   try {
-    const sessionData = await fs.readJson('session_data.json');
-    const recordings = sessionData.bbb_session.recordings || [];
+    const files = await fs.readdir('.');
+    // Match session_data.json OR session_data_*.json
+    const sessionFiles = files.filter(f => f.startsWith('session_data') && f.endsWith('.json'));
+    
+    if (sessionFiles.length === 0) {
+        console.log("No session_data*.json files found.");
+        return;
+    }
+
+    console.log(`Found ${sessionFiles.length} session data files to process:`, sessionFiles);
+
+    let allRecordings = [];
+
+    for (const file of sessionFiles) {
+        try {
+            const data = await fs.readJson(file);
+            const recs = data.bbb_session.recordings || [];
+            console.log(` - ${file}: ${recs.length} recordings`);
+            allRecordings = allRecordings.concat(recs);
+        } catch (e) {
+            console.error(`Error reading ${file}:`, e.message);
+        }
+    }
+    
+    // De-duplicate recordings by playback_link
+    const uniqueRecordings = [];
+    const seenLinks = new Set();
+    
+    for (const r of allRecordings) {
+        if (!seenLinks.has(r.playback_link)) {
+            seenLinks.add(r.playback_link);
+            uniqueRecordings.push(r);
+        }
+    }
+    
+    const recordings = uniqueRecordings;
     
     if (recordings.length === 0) {
-        console.log("No recordings found in session_data.json");
+        console.log("No recordings found in session files.");
         return;
     }
     
-    console.log(`Loaded ${recordings.length} recordings.`);
+    console.log(`Total unique recordings to process: ${recordings.length}`);
     
     const browser = await puppeteer.launch({
       headless: false,
@@ -226,6 +174,10 @@ async function scrapePlayback() {
 
   } catch (error) {
     console.error("Error in playback scraper:", error);
+    if (process.argv.includes('--debug')) {
+        await page.screenshot({ path: 'debug_playback_error.png', fullPage: true });
+        console.log("Saved debug_playback_error.png");
+    }
   }
 }
 

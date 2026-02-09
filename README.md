@@ -4,111 +4,112 @@ A web scraping and video processing pipeline for SENCE Aula Digital (BigBlueButt
 
 ## Features
 
-- **Scraping**: Extracts recording links and detailed video content (webcam/deskshare).
-- **Downloading**: Downloads videos with date-based filenames (e.g., `202601051750_webcams.webm`).
+- **Automated Scraping**: Full auto-login support (ClaveÚnica) via `.env` credentials.
+- **Batch Processing**: Filter and scrape multiple modules automatically.
+- **Downloading**: Downloads videos with date-based filenames.
 - **Processing**: Merges webcam and deskshare videos into a single Picture-in-Picture (PiP) MP4 file using FFmpeg.
-- **Dual Support**: Available in **Python** and **JavaScript (Node.js)**.
 
 ## Prerequisites
 
-- **FFmpeg**: Required for video merging (`merge_videos`).
-- **Python Version**: Python 3.7+ (for Python scripts).
-- **Node.js**: Node 18+ (for JS version).
+- **Node.js**: Node 18+ (Required for main scripts).
+- **FFmpeg**: Required for video merging.
+- **Python 3.7+**: (Optional legacy support).
 
----
+## 🚀 Usage (JavaScript)
 
-## 🐍 Python Usage
-
-Python scripts are located in the `pyhon_code/` directory.
-
-### Setup
-
-1.  Install dependencies:
-    ```bash
-    pip install selenium requests
-    # Ensure ffmpeg is installed on your system
-    ```
-2.  (Optional) Create a virtual environment.
-
-### Workflow
-
-Run scripts in order (from project root):
-
-1.  **Get Recording List** (Manual Login required):
-
-    ```bash
-    python pyhon_code/session_scraper.py
-    ```
-
-    _Output: `session_data.json`_
-
-2.  **Get Video Details** (Manual Login required once):
-
-    ```bash
-    python pyhon_code/playback_scraper.py
-    ```
-
-    _Output: `playback_data_TIMESTAMP.json`_
-
-3.  **Download Videos**:
-
-    ```bash
-    python pyhon_code/download_videos.py
-    ```
-
-    _Output: `downloaded_videos/` folder_
-
-4.  **Merge & Optimize Videos** (H.264 MP4):
-    ```bash
-    python pyhon_code/merge_videos.py
-    ```
-    _Output: `merged_videos/` folder_
-
----
-
-## 🚀 JavaScript Usage (Node.js)
-
-JavaScript scripts are located in the **root** directory.
-
-### Setup
+### 1. Setup
 
 1.  Install dependencies:
     ```bash
     npm install
-    # Installs puppeteer, axios, fs-extra, etc.
+    # Installs puppeteer, fs-extra, dotenv, etc.
     ```
-
-### Workflow
-
-Run scripts in order:
-
-1.  **Get Recording List**:
-
+2.  Configure `.env` file:
     ```bash
-    node session_scraper.js
+    cp .env.example .env
+    ```
+    Edit `.env` with your ClaveÚnica credentials:
+    ```ini
+    RUN=12345678-9
+    PASSWORD=yourpassword
+    COURSE_HOME_URL=https://auladigital.sence.cl/...
+    BBB_FILTER="Módulo 4"  # Optional: Filter specific modules
     ```
 
-2.  **Get Video Details**:
+### 2. Workflow
 
-    ```bash
-    node playback_scraper.js
-    ```
+Run the scripts in the following order:
 
-3.  **Download Videos**:
+#### Step 1: Scrape Home (Get Module List)
 
-    ```bash
-    node download_videos.js
-    ```
+Extracts all available BBB modules from the course home page.
 
-4.  **Merge & Optimize Videos**:
-    ```bash
-    node merge_videos.js
-    ```
+```bash
+node home_scraper.js
+```
+
+_Output: `bbb_modules.json`_
+
+#### Step 2: Scrape Sessions (Get Recording Links)
+
+Iterates through modules and extracts recording links.
+
+- **Batch Mode (Recommended):** Scrapes modules matches `BBB_FILTER` in `.env`.
+
+  ```bash
+  node session_scraper.js
+  ```
+
+  _Output: `session_data_X_modulename.json`_
+
+- **Single URL Mode:** Scrape a specific BBB page directly.
+  ```bash
+  node session_scraper.js "https://auladigital.sence.cl/mod/bigbluebuttonbn/view.php?id=XXXX"
+  ```
+
+#### Step 3: Scrape Playback (Get Video Sources)
+
+Processes all session data files to extract actual video/audio URLs.
+
+```bash
+node playback_scraper.js
+```
+
+_Output: `playback_data_TIMESTAMP.json`_
+
+#### Step 4: Download Videos
+
+Downloads the video and audio files.
+
+```bash
+node download_videos.js
+```
+
+_Downloads to: `downloaded_videos/`_
+
+#### Step 5: Merge Videos
+
+Merges video and audio tracks into a final MP4.
+
+```bash
+node merge_videos.js
+```
+
+_Output: `merged_videos/`_
+
+## Debugging
+
+- Pass `--debug` to any scraper script to generate screenshots and HTML dumps on error.
+  ```bash
+  node session_scraper.js --debug
+  ```
 
 ---
 
-## Notes
+## 🐍 Python Usage (Legacy)
 
-- **Authentication**: Scripts use a manual login flow. A browser window will open; log in via ClaveÚnica, then press ENTER in the terminal to continue.
-- **Do Not Close Browser**: The browser must remain open during scraping.
-- **Merging**: `merge_videos` creates a **new** MP4 file in `merged_videos/` and does not delete the originals.
+Legacy Python scripts are available in `python_code/` but do not support the new auto-login features.
+
+```bash
+python python_code/session_scraper.py
+```
