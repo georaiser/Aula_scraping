@@ -4,46 +4,44 @@ A web scraping and video processing pipeline for SENCE Aula Digital (BigBlueButt
 
 ## Features
 
-- **Automated Scraping**: Full auto-login support (ClaveÚnica) via `.env` credentials.
-- **Batch Processing**: Filter and scrape multiple modules automatically.
-- **Downloading**: Downloads videos with date-based filenames.
-- **Processing**: Merges webcam and deskshare videos into a single Picture-in-Picture (PiP) MP4 file using FFmpeg.
+- **Automated Scraping**: Full auto-login support (ClaveÚnica) via `.env` credentials
+- **Session Persistence**: Cookie-based session reuse to avoid repeated logins
+- **Batch Processing**: Filter and scrape multiple modules automatically
+- **Dynamic Folders**: Organized downloads/merges by module name
+- **Optimized Code**: Clean, modular scripts with helper functions and emoji indicators
 
 ## Prerequisites
 
-- **Node.js**: Node 18+ (Required for main scripts).
-- **FFmpeg**: Required for video merging.
-- **Python 3.7+**: (Optional legacy support).
+- **Node.js**: v18+ required
+- **FFmpeg**: Required for video merging
+- **Python 3.7+**: (Optional, for legacy scripts)
 
-## 🚀 Usage (JavaScript)
+## Installation
 
-### 1. Setup
+```bash
+npm install puppeteer fs-extra dotenv axios glob
+```
 
-1.  Install dependencies:
-    ````bash
-    ```bash
-    npm install puppeteer fs-extra dotenv axios glob
-    ````
-    ```
+## Configuration
 
-    ```
-2.  Configure `.env` file:
-    ```bash
-    cp .env.example .env
-    ```
-    Edit `.env` with your ClaveÚnica credentials:
-    ```ini
-    RUN=12345678-9
-    PASSWORD=yourpassword
-    COURSE_HOME_URL=https://auladigital.sence.cl/...
-    BBB_FILTER="Módulo 4"  # Optional: Filter specific modules
-    ```
+Create a `.env` file:
 
-### 2. Workflow
+```bash
+cp .env.example .env
+```
 
-Run the scripts in the following order:
+Edit `.env` with your credentials:
 
-#### Step 1: Scrape Home (Get Module List)
+```ini
+RUN=12345678-9
+PASSWORD=yourpassword
+COURSE_HOME_URL=https://auladigital.sence.cl/...
+BBB_FILTER="Módulo 4"  # Optional: Filter specific modules
+```
+
+## Workflow
+
+### Step 1: Scrape Home (Get Module List)
 
 Extracts all available BBB modules from the course home page.
 
@@ -51,26 +49,32 @@ Extracts all available BBB modules from the course home page.
 node home_scraper.js
 ```
 
-_Output: `bbb_modules.json`_
+**Output:** `bbb_modules.json` (root directory, contains all modules)
 
-#### Step 2: Scrape Sessions (Get Recording Links)
+### Step 2: Scrape Sessions (Get Recording Links)
 
 Iterates through modules and extracts recording links.
 
-- **Batch Mode (Recommended):** Scrapes modules matches `BBB_FILTER` in `.env`.
+**Batch Mode (Recommended):** Scrapes modules matching `BBB_FILTER` in `.env`
 
-  ```bash
-  node session_scraper.js
-  ```
+```bash
+node session_scraper.js
+```
 
-  _Output: `session_data_X_modulename.json`_
+**Single URL Mode:** Scrape a specific BBB page directly
 
-- **Single URL Mode:** Scrape a specific BBB page directly.
-  ```bash
-  node session_scraper.js "https://auladigital.sence.cl/mod/bigbluebuttonbn/view.php?id=XXXX"
-  ```
+```bash
+node session_scraper.js "https://auladigital.sence.cl/mod/bigbluebuttonbn/view.php?id=XXXX"
+```
 
-#### Step 3: Scrape Playback (Get Video Sources)
+**Output:** `scraped_data/{Module_Name}/session_modulename.json`
+
+**Features:**
+
+- Automatic session persistence (saves/loads cookies)
+- Deduplicates module links
+
+### Step 3: Scrape Playback (Get Video Sources)
 
 Processes all session data files to extract actual video/audio URLs.
 
@@ -78,40 +82,74 @@ Processes all session data files to extract actual video/audio URLs.
 node playback_scraper.js
 ```
 
-_Output: `playback_data_TIMESTAMP.json`_
+**Output:** `scraped_data/{Module_Name}/playback_data_TIMESTAMP.json`
 
-#### Step 4: Download Videos
+### Step 4: Download Videos
 
-Downloads the video and audio files.
+Downloads the video and audio files with date-based filenames.
 
 ```bash
 node download_videos.js
 ```
 
-_Downloads to: `downloaded_videos/`_
+**Output:** `downloaded_videos/{Module_Name}/`
 
-#### Step 5: Merge Videos
+### Step 5: Merge Videos
 
-Merges video and audio tracks into a final MP4.
+Merges video and audio tracks into a final Picture-in-Picture MP4.
 
 ```bash
 node merge_videos.js
 ```
 
-_Output: `merged_videos/`_
+**Output:** `merged_videos/{Module_Name}/`
+
+**Note:** All outputs are organized by the `BBB_FILTER` value (e.g., "Módulo 2" → `Modulo_2/` folder)
+
+## Folder Structure
+
+When using `BBB_FILTER="Módulo 2"`, the output structure is:
+
+```
+scraped_data/
+  └── Modulo_2/
+      ├── session_modulo_2.json
+      └── playback_data_TIMESTAMP.json
+downloaded_videos/
+  └── Modulo_2/
+      ├── 202601051750_webcams.webm
+      └── 202601051750_deskshare.webm
+merged_videos/
+  └── Modulo_2/
+      └── 202601051750_merged.mp4
+```
+
+## Session Persistence
+
+Cookies are automatically saved to `session_cookies.json` after login. Subsequent runs will reuse the session, eliminating the need for repeated authentication.
 
 ## Debugging
 
-- Pass `--debug` to any scraper script to generate screenshots and HTML dumps on error.
-  ```bash
-  node session_scraper.js --debug
-  ```
+Pass `--debug` to any scraper script to generate screenshots and HTML dumps on error:
 
----
+```bash
+node session_scraper.js --debug
+```
 
-## 🐍 Python Usage (Legacy)
+## Visual Indicators
 
-Legacy Python scripts are available in `python_code/` but do not support the new auto-login features.
+All scripts use emoji indicators for quick visual feedback:
+
+- ✓ Success
+- ✗ Error
+- ⚠ Warning
+- ⏭ Skipped
+- ⬇ Downloading
+- 🎬 Merging
+
+## Python Scripts (Legacy)
+
+Legacy Python scripts are available in `python_code/` but do not support auto-login or session persistence.
 
 ```bash
 python python_code/session_scraper.py

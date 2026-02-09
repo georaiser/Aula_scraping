@@ -1,157 +1,193 @@
-
 import 'dotenv/config';
 import puppeteer from 'puppeteer';
 import fs from 'fs-extra';
 import { autoLogin, saveSession } from './auth.js';
 
-// Configuration
 const CONFIG = {
     headless: false,
     defaultViewport: null,
     args: ['--start-maximized']
 };
 
-/**
- * Scrapes a single BBB session.
- * @param {puppeteer.Browser} browser - The Puppeteer browser instance.
- * @param {string} url - The URL of the BBB session.
- * @param {string} outputFilename - The filename to save the JSON data.
- */
+// Helper: Sanitize text for filename
+function sanitizeFilename(text) {
+    return text
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Remove accents
+        .replace(/[^a-z0-9]/gi, '_')
+        .toLowerCase();
+}
+
+// Helper: Get playback link from row
+function extractPlaybackLink(linkElement) {
+    if (!linkElement) return null;
+    
+    const dataHref = linkElement.getAttribute('data-href');
+    const href = linkElement.getAttribute('href');
+    const link = dataHref || (href !== '#' ? href : null);
+    
+    return link?.startsWith('http') ? link : `https://auladigital.sence.cl${link}`;
+}
+
+// Scrape recordings from page
+async function scrapeRecordings(page) {
+    return await page.evaluate(() => {
+        const rows = document.querySelectorAll('#bigbluebuttonbn_recordings_table tbody tr, .generaltable tbody tr');
+        const results = [];
+        
+        rows.forEach(row => {
+            const cells = row.querySelectorAll('td');
+            if (cells.length < 5) return;
+            
+            const linkElement = row.querySelector('a.btn');
+            if (!linkElement) return;
+            
+            // Get the recording name from column 1 (c1)
+            const nameText = cells[1]?.textContent?.trim() || 'Recording';
+            
+            // Get the date from column 4 (c4)
+            const dateText = cells[4]?.textContent?.trim() || '';
+            
+            // Combine: "Mon, 5 Jan 2026, 5:50 PM -03 - 💻Aula virtual en vivo Módulo 2"
+            const fullName = dateText ? `${dateText} - ${nameText}` : nameText;
+            
+            // Extract the actual playback URL from data-href or href parameter
+            const dataHref = linkElement.getAttribute('data-href');
+            const href = linkElement.getAttribute('href');
+            let playbackUrl = dataHref || href;
+            
+            // If URL contains href parameter, extract the actual playback URL
+            if (playbackUrl && playbackUrl.includes('href=')) {
+                try {
+                    const urlParams = new URLSearchParams(playbackUrl.split('?')[1]);
+                    const hrefParam = urlParams.get('href');
+                    if (hrefParam) {
+                        playbackUrl = decodeURIComponent(hrefParam);
+                    }
+                } catch (e) {
+                    // Keep original URL if parsing fails
+                }
+            }
+            
+            if (playbackUrl && playbackUrl !== '#') {
+                // Ensure absolute URL
+                if (!playbackUrl.startsWith('http')) {
+                    playbackUrl = `https://auladigital.sence.cl${playbackUrl}`;
+                }
+                
+                results.push({
+                    name: fullName,
+                    type: "Presentation",
+                    playback_link: playbackUrl
+                });
+            }
+        });
+        
+        return results;
+    });
+}
+
+// Scrape a single session
 async function scrapeSession(browser, url, outputFilename) {
-    console.log(`\nProcessing Session: ${url}`);
+    console.log(`\nProcessing: ${url}`);
     const page = await browser.newPage();
     
     try {
-        console.log("1. Navigating...");
         await page.goto(url, { waitUntil: 'networkidle2' });
 
-        // Auto-login (idempotent - checks if already logged in)
-        const loggedIn = await autoLogin(page);
-        if (!loggedIn) {
-            console.log("   WARNING: Login might have failed or manual intervention needed.");
+        if (!await autoLogin(page)) {
+            console.log("   ⚠ Login may have failed");
         }
 
-        // Wait for potential redirects
         await new Promise(r => setTimeout(r, 5000));
         
-        // Ensure we are at the target (re-navigate if redirected to dashboard/home)
+        // Re-navigate if redirected
         if (page.url() !== url) {
-             console.log(`   Redirected to ${page.url()}. Forcing navigation to ${url}...`);
-             await page.goto(url, { waitUntil: 'load' });
+            console.log(`   Redirected, forcing navigation...`);
+            await page.goto(url, { waitUntil: 'load' });
         }
 
-        // Attempt to find the recordings table
-        try {
-            await page.waitForSelector('#bigbluebuttonbn_recordings_table, .generaltable', { timeout: 10000 });
-        } catch (e) {
-            console.log("   Table not found immediately. Checking DOM...");
-        }
+        const recordings = await scrapeRecordings(page);
+        console.log(`   ✓ Found ${recordings.length} recordings`);
 
-        // Scrape
-        console.log("2. Scraping recordings...");
-        const recordings = await page.evaluate(() => {
-            let rows = document.querySelectorAll('#bigbluebuttonbn_recordings_table tbody tr');
-            if (rows.length === 0) rows = document.querySelectorAll('.generaltable tbody tr');
-            
-            const results = [];
-            rows.forEach(row => {
-                const cells = row.querySelectorAll('td');
-                if (cells.length < 5) return;
-                
-                const linkElement = row.querySelector('a.btn');
-                let playbackLink = linkElement ? linkElement.getAttribute('data-href') : null;
-                
-                if (!playbackLink && linkElement) {
-                    const href = linkElement.getAttribute('href');
-                    if (href && href !== '#') playbackLink = href;
-                }
-                
-                if (playbackLink) {
-                    results.push({
-                        name: row.innerText.split('\n')[0].trim(),
-                        type: "Presentation",
-                        playback_link: playbackLink.startsWith('http') ? playbackLink : `https://auladigital.sence.cl${playbackLink}`
-                    });
-                }
-            });
-            return results;
-        });
-
-        console.log(`   -> Extracted ${recordings.length} recordings.`);
-
-        // Handle verification debug (optional)
         if (recordings.length === 0 && process.argv.includes('--debug')) {
             await page.screenshot({ path: `debug_${outputFilename}.png`, fullPage: true });
         }
 
-        // Save Data
-        const outputData = { bbb_session: { recordings: recordings } };
-        await fs.writeJson(outputFilename, outputData, { spaces: 4 });
-        console.log(`   -> Saved to ${outputFilename}`);
+        // Create output directory if BBB_FILTER is set
+        const filter = process.env.BBB_FILTER;
+        let outputPath = outputFilename;
+        
+        if (filter) {
+            const safeName = sanitizeFilename(filter);
+            const outputDir = `scraped_data/${safeName}`;
+            await fs.ensureDir(outputDir);
+            outputPath = `${outputDir}/${outputFilename}`;
+        }
+
+        await fs.writeJson(outputPath, { bbb_session: { recordings } }, { spaces: 4 });
+        console.log(`   ✓ Saved to ${outputPath}`);
 
     } catch (e) {
-        console.error(`   Error processing ${url}:`, e.message);
+        console.error(`   ✗ Error: ${e.message}`);
     } finally {
         await page.close();
     }
 }
 
-async function main() {
-    console.log("Starting SENCE Session Scraper...");
+// Load and filter modules
+async function loadTasks(filter) {
+    if (!fs.existsSync('bbb_modules.json')) {
+        console.error("Error: bbb_modules.json not found. Run 'node home_scraper.js' first.");
+        process.exit(1);
+    }
+    
+    const { modules = [] } = await fs.readJson('bbb_modules.json');
+    
+    // Filter and deduplicate
+    const filtered = modules.filter(m => m.text.toLowerCase().includes(filter.toLowerCase()));
+    const unique = filtered.filter((m, i, arr) => arr.findIndex(x => x.link === m.link) === i);
+    
+    if (unique.length === 0) {
+        console.error(`No modules matched filter: ${filter}`);
+        process.exit(0);
+    }
+    
+    console.log(`Found ${unique.length} unique modules`);
+    
+    return unique.map((m, i) => {
+        // Extract module name: "💻Aula virtual en vivo Módulo 2\nBigBlueButton" -> "modulo_2"
+        const moduleMatch = m.text.match(/módulo\s+\d+/i);
+        const simpleName = moduleMatch ? sanitizeFilename(moduleMatch[0]) : `module_${i + 1}`;
+        
+        return {
+            url: m.link,
+            name: `session_${simpleName}.json`
+        };
+    });
+}
 
-    // Determine Work Mode
+async function main() {
+    console.log("Starting SENCE Session Scraper...\n");
+
     const argUrl = process.argv[2];
     const filter = process.env.BBB_FILTER;
     
-    let tasks = [];
+    let tasks;
 
-    if (argUrl && argUrl.startsWith('http')) {
-        // MODE A: Single URL from Arg
-        console.log("Mode: Single URL (Argument)");
-        tasks.push({ url: argUrl, name: 'session_data.json' });
+    if (argUrl?.startsWith('http')) {
+        console.log("Mode: Single URL");
+        tasks = [{ url: argUrl, name: 'session_data.json' }];
     } else if (filter) {
-        // MODE B: Filter from ENV
         console.log(`Mode: Batch Filter ("${filter}")`);
-        
-        if (!fs.existsSync('bbb_modules.json')) {
-            console.error("Error: bbb_modules.json not found. Run 'node home_scraper.js' first.");
-            process.exit(1);
-        }
-        
-        const data = await fs.readJson('bbb_modules.json');
-        let modules = (data.modules || []).filter(m => m.text.toLowerCase().includes(filter.toLowerCase()));
-        
-        if (modules.length === 0) {
-            console.error(`No modules matched filter: ${filter}`);
-            process.exit(0);
-        }
-        
-        // Deduplicate by Link
-        const uniqueModules = [];
-        const seenLinks = new Set();
-        for (const m of modules) {
-            if (!seenLinks.has(m.link)) {
-                seenLinks.add(m.link);
-                uniqueModules.push(m);
-            }
-        }
-        modules = uniqueModules;
-        
-        console.log(`Found ${modules.length} matching modules (unique).`);
-        
-        tasks = modules.map((m, i) => ({
-            url: m.link,
-            name: `session_data_${i+1}_${m.text.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.json`
-        }));
+        tasks = await loadTasks(filter);
     } else {
-        console.error("Error: No URL provided (arg) and no BBB_FILTER (env).");
-        console.log("Usage:");
+        console.error("Error: No URL or BBB_FILTER provided");
+        console.log("\nUsage:");
         console.log("  1. node session_scraper.js <URL>");
         console.log("  2. Set BBB_FILTER in .env and run: node session_scraper.js");
         process.exit(1);
     }
 
-    // Execution
     const browser = await puppeteer.launch(CONFIG);
     
     try {
@@ -159,12 +195,8 @@ async function main() {
             await scrapeSession(browser, task.url, task.name);
         }
     } finally {
-        if (process.env.KEEP_OPEN === 'true') {
-            console.log("\nKeeping browser open (KEEP_OPEN=true). Process will not exit automatically.");
-        } else {
-            console.log("\nClosing browser...");
-            await browser.close();
-        }
+        console.log("\n✓ Closing browser...");
+        await browser.close();
     }
 }
 
