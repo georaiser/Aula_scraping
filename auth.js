@@ -118,19 +118,32 @@ export async function autoLogin(page) {
     console.log("Checking authentication...");
 
     // Try restoring session
-    if (await loadSession(page)) {
+    const cookiesLoaded = await loadSession(page);
+    
+    if (cookiesLoaded) {
+        // Test if cookies are still valid by reloading the page
         if (page.url() && page.url() !== 'about:blank') {
             try {
+                console.log("   Testing saved session...");
                 await page.reload({ waitUntil: 'networkidle2', timeout: 30000 });
+                
+                // Check if session is still valid
+                if (isLoggedIn(page.url())) {
+                    console.log("✓ Session restored successfully");
+                    return true;
+                } else {
+                    console.log("   Session expired, re-authenticating...");
+                }
             } catch {
                 console.log("⚠ Reload timed out");
             }
         }
     }
     
-    // Check if already logged in
+    // Check if already logged in (without cookies)
     if (isLoggedIn(page.url())) {
         console.log("✓ Already logged in");
+        await saveSession(page); // Save current session
         return true;
     }
 
