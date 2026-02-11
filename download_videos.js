@@ -86,16 +86,24 @@ async function main() {
     
     // Determine output directory
     let outputDir = 'downloaded_videos';
+    let mergedDir = 'merged_videos';
     const moduleFilter = process.env.BBB_FILTER;
     
     if (moduleFilter) {
-        outputDir = path.join(outputDir, sanitizeFilterName(moduleFilter));
+        const safeName = sanitizeFilterName(moduleFilter);
+        outputDir = path.join(outputDir, safeName);
+        mergedDir = path.join(mergedDir, safeName);
+        console.log(`Output: ${outputDir}`);
+        console.log(`Checking Merged: ${mergedDir}\n`);
+    } else {
         console.log(`Output: ${outputDir}\n`);
     }
     
     await fs.ensureDir(outputDir);
     
     // Download videos
+    let skippedCount = 0;
+    
     for (const item of data) {
         const videos = item.scraped_content?.videos || [];
         
@@ -109,6 +117,14 @@ async function main() {
         
         if (!filePrefix) {
             console.log(`⚠ Skipping: Could not extract timestamp from URL for '${item.name}'`);
+            continue;
+        }
+        
+        // Check if merged video already exists
+        const mergedPath = path.join(mergedDir, `${filePrefix}_merged.mp4`);
+        if (await fs.pathExists(mergedPath)) {
+            console.log(`⏭ ${filePrefix}_merged.mp4 (already merged)`);
+            skippedCount++;
             continue;
         }
         
@@ -134,7 +150,11 @@ async function main() {
         }
     }
     
-    console.log(`\n✓ Complete. Check '${outputDir}'`);
+    console.log(`\n✓ Complete. Processed ${data.length} items.`);
+    if (skippedCount > 0) {
+        console.log(`  (Skipped ${skippedCount} already merged videos)`);
+    }
+    console.log(`  Check '${outputDir}'`);
 }
 
 main();

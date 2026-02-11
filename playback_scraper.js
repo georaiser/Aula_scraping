@@ -95,6 +95,44 @@ async function extractMediaSources(page) {
     });
 }
 
+// Helper: Load existing playback data to avoid re-scraping
+async function loadExistingPlaybackData(searchDir) {
+    try {
+        if (!await fs.pathExists(searchDir)) return new Map();
+        
+        const files = await fs.readdir(searchDir);
+        const playbackFiles = files.filter(f => f.startsWith('playback_data_') && f.endsWith('.json'));
+        
+        if (playbackFiles.length === 0) return new Map();
+        
+        // Sort by time (newest first) to get latest data
+        playbackFiles.sort((a, b) => {
+            const timeA = fs.statSync(path.join(searchDir, a)).mtime.getTime();
+            const timeB = fs.statSync(path.join(searchDir, b)).mtime.getTime();
+            return timeB - timeA;
+        });
+        
+        // Load the latest file
+        const latestFile = path.join(searchDir, playbackFiles[0]);
+        console.log(`Loading existing data from ${playbackFiles[0]}`);
+        const data = await fs.readJson(latestFile);
+        
+        // Map playback_link -> scraped data
+        const map = new Map();
+        data.forEach(item => {
+            if (item.playback_link && item.scraped_content) {
+                map.set(item.playback_link, item);
+            }
+        });
+        
+        console.log(`✓ Loaded ${map.size} existing recordings`);
+        return map;
+    } catch (e) {
+        console.log(`⚠ Could not load existing data: ${e.message}`);
+        return new Map();
+    }
+}
+
 async function main() {
     console.log("Starting SENCE Playback Scraper...\n");
 
@@ -106,25 +144,54 @@ async function main() {
             return;
         }
 
+        // Determine output directory to check for existing data
+        const filter = process.env.BBB_FILTER;
+        let outputDir = 'scraped_data';
+        if (filter) {
+            const safeName = filter
+                .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+                .replace(/[^a-z0-9]/gi, '_')
+                .toLowerCase();
+            outputDir = `scraped_data/${safeName}`;
+        }
+
+        // Load existing data
+        const existingDataMap = await loadExistingPlaybackData(outputDir);
+        
+        // Identify new recordings
+        const newRecordings = recordings.filter(rec => !existingDataMap.has(rec.playback_link));
+        console.log(`\nStatus: ${existingDataMap.size} existing, ${newRecordings.length} new\n`);
+
         const browser = await puppeteer.launch(CONFIG);
         const page = await browser.newPage();
+        const enrichedData = [];
 
         try {
-            // Navigate to first link for auto-login
-            console.log("Authenticating...");
-            await page.goto(recordings[0].playback_link, { waitUntil: 'networkidle2' });
-            
-            if (!await autoLogin(page)) {
-                console.log("⚠ Auto-login incomplete - session may be required\n");
+            // Only authenticate if we have new recordings to scrape
+            if (newRecordings.length > 0) {
+                console.log("Authenticating...");
+                // Use the first new recording link for auth, or fallback to first recording
+                const authLink = newRecordings[0].playback_link;
+                await page.goto(authLink, { waitUntil: 'networkidle2' });
+                
+                if (!await autoLogin(page)) {
+                    console.log("⚠ Auto-login incomplete - session may be required\n");
+                }
             }
 
-            // Process all recordings
-            const enrichedData = [];
-            
+            // Process all recordings (use existing or scrape new)
             for (let i = 0; i < recordings.length; i++) {
                 const rec = recordings[i];
                 console.log(`[${i + 1}/${recordings.length}] ${rec.name.substring(0, 40)}...`);
                 
+                // Check if we already have data
+                if (existingDataMap.has(rec.playback_link)) {
+                    console.log("  ✓ Using cached data");
+                    enrichedData.push(existingDataMap.get(rec.playback_link));
+                    continue;
+                }
+
+                // Scrape new recording
                 try {
                     await page.goto(rec.playback_link, { waitUntil: 'networkidle2', timeout: 60000 });
                     
@@ -140,7 +207,7 @@ async function main() {
                     const scrapedContent = await extractMediaSources(page);
                     
                     if (scrapedContent.videos.length > 0) {
-                        console.log(`  ✓ ${scrapedContent.videos.length} video(s)`);
+                        console.log(`  ✓ ${scrapedContent.videos.length} video(s) (Scraped)`);
                         enrichedData.push({
                             ...rec,
                             realplayback_url: page.url(),
@@ -160,7 +227,6 @@ async function main() {
             let outFile = `playback_data_${timestamp}.json`;
             
             // Create output directory if BBB_FILTER is set
-            const filter = process.env.BBB_FILTER;
             if (filter) {
                 const safeName = filter
                     .normalize("NFD").replace(/[\u0300-\u036f]/g, "")

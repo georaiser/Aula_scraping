@@ -18,7 +18,7 @@ async function mergeWithFFmpeg(deskFile, webcamFile, outputFile) {
         '-v', 'quiet', '-stats',
         '-i', deskFile,
         '-i', webcamFile,
-        '-filter_complex', '[1]scale=iw/5:-1[pip];[0][pip]overlay=main_w-overlay_w-20:main_h-overlay_h-20[merged];[merged]scale=1280:-2',
+        '-filter_complex', '[1]scale=iw/5:-1[pip];[0][pip]overlay=main_w-overlay_w-20:main_h-overlay_h-40[merged];[merged]scale=1280:-2',
         '-map', '1:a',
         '-c:v', 'libx264',
         '-preset', 'fast',
@@ -73,6 +73,8 @@ async function main() {
     const deskshareFiles = await glob(path.join(inputDir, '*_deskshare.webm'));
     console.log(`Found ${deskshareFiles.length} recording sets\n`);
     
+    let skippedCount = 0;
+    
     for (const deskFile of deskshareFiles) {
         const prefix = path.basename(deskFile).replace('_deskshare.webm', '');
         const webcamFile = path.join(inputDir, `${prefix}_webcams.webm`);
@@ -84,7 +86,8 @@ async function main() {
         }
         
         if (await fs.pathExists(outputFile)) {
-            console.log(`⏭ ${prefix}: Already exists`);
+            console.log(`⏭ ${prefix}_merged.mp4 (exists)`);
+            skippedCount++;
             continue;
         }
         
@@ -92,7 +95,11 @@ async function main() {
         await mergeWithFFmpeg(deskFile, webcamFile, outputFile);
     }
     
-    console.log(`\n✓ Merge complete. Check '${outputDir}'`);
+    console.log(`\n✓ Merge complete. Processed ${deskshareFiles.length} items.`);
+    if (skippedCount > 0) {
+        console.log(`  (Skipped ${skippedCount} existing files)`);
+    }
+    console.log(`  Check '${outputDir}'`);
 }
 
 main();
