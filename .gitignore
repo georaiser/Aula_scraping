@@ -3,3 +3,4 @@ merged_videos
 scraped_data
 node_modules
 .env
+session_cookies.json
