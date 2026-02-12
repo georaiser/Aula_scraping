@@ -41,7 +41,17 @@ COURSE_HOME_URL=https://auladigital.sence.cl/...
 BBB_FILTER="Módulo 4"  # Optional: Filter specific modules
 ```
 
-## Workflow
+## Automated Workflow (Recommended)
+
+Run the entire pipeline with a single command:
+
+```bash
+node run_scraping_flow.js
+```
+
+This sequentially executes the scraping, downloading, and merging steps, automatically skipping any content that has already been processed.
+
+## Manual Workflow
 
 ### Step 1: Scrape Home (Get Module List)
 

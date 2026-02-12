@@ -127,7 +127,30 @@ Wait for the installation to complete. You should see a progress bar and no erro
 
 ---
 
-## Running the Scripts
+---
+
+## Automated Workflow (Recommended)
+
+Instead of running each script manually, you can use the **Orchestrator Script** to run the entire pipeline automatically:
+
+```cmd
+node run_scraping_flow.js
+```
+
+**This single command will:**
+
+1. **Scrape Sessions** (skip if no new sessions)
+2. **Scrape Video Links** (skip valid internal data)
+3. **Download Videos** (skip if merged video exists)
+4. **Merge Videos** (skip if output exists)
+
+It handles login automatically and respects your `BBB_FILTER` settings.
+
+---
+
+## Manual Execution (Advanced)
+
+If you prefer to run step-by-step:
 
 ### Step 6: Scrape Home Page (Get Module List)
 
