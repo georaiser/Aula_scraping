@@ -88,6 +88,39 @@ def load_recordings(bbb_filter=''):
     with open(latest_file, 'r', encoding='utf-8') as f:
         return json.load(f)
 
+def load_existing_playback_data(search_dir):
+    """Load existing playback data to avoid re-scraping"""
+    try:
+        if not os.path.exists(search_dir):
+            return {}
+        
+        # Find all playback files
+        playback_files = glob.glob(f"{search_dir}/playback_data_*.json")
+        if not playback_files:
+            return {}
+        
+        # Sort by modification time (newest first)
+        playback_files.sort(key=os.path.getctime, reverse=True)
+        
+        latest_file = playback_files[0]
+        print(f"Loading existing data from: {latest_file}")
+        
+        with open(latest_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            
+        # Map playback_link -> data
+        existing_map = {}
+        for item in data:
+            if 'playback_link' in item and 'scraped_content' in item:
+                existing_map[item['playback_link']] = item
+        
+        print(f"✓ Loaded {len(existing_map)} existing recordings")
+        return existing_map
+        
+    except Exception as e:
+        print(f"⚠ Could not load existing data: {e}")
+        return {}
+
 def main():
     """Main function"""
     print("Starting SENCE Playback Scraper (Python)...\n")
@@ -95,34 +128,57 @@ def main():
     # Get filter from environment
     bbb_filter = os.getenv('BBB_FILTER', '')
     
-    # Load recordings
+    # Determine directories
+    if bbb_filter:
+        safe_name = sanitize_filter_name(bbb_filter)
+        output_dir = f"scraped_data/{safe_name}"
+    else:
+        output_dir = "scraped_data"
+        
+    # Load recordings to process
     recordings = load_recordings(bbb_filter)
     if not recordings:
         print("No recordings to process.")
         return
     
-    print(f"Found {len(recordings)} recordings to process\n")
+    # Load existing data
+    existing_map = load_existing_playback_data(output_dir)
     
-    # Setup driver
-    driver = setup_driver()
+    # Identify new recordings
+    new_recordings = [r for r in recordings if r['playback_link'] not in existing_map]
+    print(f"\nStatus: {len(existing_map)} existing, {len(new_recordings)} new\n")
+    
+    # Setup driver only if needed
+    if new_recordings:
+        driver = setup_driver()
+        print("Browser started for scraping new recordings...")
+    else:
+        driver = None
+        print("No new recordings to scrape.")
     
     try:
-        # Process each recording
-        results = []
+        enriched_data = []
         
         for i, recording in enumerate(recordings, 1):
             print(f"[{i}/{len(recordings)}] {recording.get('name', 'Unknown')[:60]}...")
-            
             playback_link = recording.get('playback_link', '')
+            
+            # Check existing
+            if playback_link in existing_map:
+                print("   ✓ Using cached data")
+                enriched_data.append(existing_map[playback_link])
+                continue
+            
+            # Scrape new
             if not playback_link:
                 print("   ⚠ No playback link")
                 continue
-            
+                
             videos = scrape_playback(driver, playback_link)
             
             if videos:
-                print(f"   ✓ Found {len(videos)} video(s)")
-                results.append({
+                print(f"   ✓ Found {len(videos)} video(s) (Scraped)")
+                enriched_data.append({
                     "name": recording['name'],
                     "playback_link": playback_link,
                     "scraped_content": {
@@ -131,31 +187,26 @@ def main():
                 })
             else:
                 print("   ⚠ No videos found")
-        
+
         # Save results
-        if bbb_filter:
-            safe_name = sanitize_filter_name(bbb_filter)
-            output_dir = f"scraped_data/{safe_name}"
-            os.makedirs(output_dir, exist_ok=True)
-        else:
-            output_dir = "scraped_data"
-            os.makedirs(output_dir, exist_ok=True)
+        os.makedirs(output_dir, exist_ok=True)
         
         timestamp = time.strftime("%Y-%m-%dT%H-%M-%S")
         filename = f"{output_dir}/playback_data_{timestamp}.json"
         
         with open(filename, 'w', encoding='utf-8') as f:
-            json.dump(results, f, indent=2, ensure_ascii=False)
+            json.dump(enriched_data, f, indent=2, ensure_ascii=False)
         
-        print(f"\n✓ Saved {len(results)} playback results to {filename}")
+        print(f"\n✓ Saved {len(enriched_data)} results to {filename}")
         
     except Exception as e:
         print(f"\n✗ An error occurred: {e}")
         import traceback
         traceback.print_exc()
     finally:
-        print("\nClosing browser...")
-        driver.quit()
+        if driver:
+            print("\nClosing browser...")
+            driver.quit()
 
 if __name__ == "__main__":
     main()

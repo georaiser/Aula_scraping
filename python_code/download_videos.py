@@ -60,11 +60,20 @@ def download_videos():
     with open(latest_file, 'r', encoding='utf-8') as f:
         data = json.load(f)
     
-    # Create downloads directory
+    # Create directories
     os.makedirs(output_dir, exist_ok=True)
     
+    # Determine merged directory for checking
+    if bbb_filter:
+        merged_dir = f"merged_videos/{safe_name}"
+    else:
+        merged_dir = "merged_videos"
+        
     print(f"Found {len(data)} recordings\n")
-    print(f"Output: {output_dir}\n")
+    print(f"Output: {output_dir}")
+    print(f"Checking Merged: {merged_dir}\n")
+    
+    skipped_merge_count = 0
     
     for item in data:
         name = item.get("name", "")
@@ -79,6 +88,14 @@ def download_videos():
         
         if not file_prefix:
             print(f"⚠ Skipping: Could not extract timestamp from URL for '{name}'")
+            continue
+            
+        # Check if merged video already exists (support both .mp4 and .webm as per previous scripts)
+        # We'll check for .mp4 as that's the new standard
+        merged_path = os.path.join(merged_dir, f"{file_prefix}_merged.mp4")
+        if os.path.exists(merged_path):
+            print(f"⏭ {file_prefix}_merged.mp4 (already merged)")
+            skipped_merge_count += 1
             continue
         
         for video_url in videos:
@@ -112,7 +129,10 @@ def download_videos():
                 print("  ✗ 'wget' not found. Please install wget.")
                 return
     
-    print(f"\n✓ Complete. Check '{output_dir}'")
+    print(f"\n✓ Complete. Processed {len(data)} items.")
+    if skipped_merge_count > 0:
+        print(f"  (Skipped {skipped_merge_count} already merged videos)")
+    print(f"  Check '{output_dir}'")
 
 if __name__ == "__main__":
     download_videos()

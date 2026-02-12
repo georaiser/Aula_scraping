@@ -22,14 +22,16 @@ def merge_with_ffmpeg(desk_file, webcam_file, output_file):
         # FFmpeg command to merge side-by-side
         cmd = [
             "ffmpeg",
+            "-v", "quiet", "-stats",
             "-i", desk_file,
             "-i", webcam_file,
-            "-filter_complex",
-            "[0:v]scale=iw/2:ih[left];[1:v]scale=iw/2:ih[right];[left][right]hstack",
-            "-c:v", "libvpx",
-            "-b:v", "1M",
-            "-c:a", "libvorbis",
-            "-y",  # Overwrite output file
+            "-filter_complex", "[1]scale=iw/5:-1[pip];[0][pip]overlay=main_w-overlay_w-20:main_h-overlay_h-40[merged];[merged]scale=1280:-2",
+            "-map", "1:a",
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-crf", "28",
+            "-c:a", "aac",
+            "-y",
             output_file
         ]
         
@@ -86,7 +88,7 @@ def merge_videos():
         # Get corresponding webcam file
         prefix = os.path.basename(desk_file).replace('_deskshare.webm', '')
         webcam_file = os.path.join(input_dir, f"{prefix}_webcams.webm")
-        output_file = os.path.join(output_dir, f"{prefix}_merged.webm")
+        output_file = os.path.join(output_dir, f"{prefix}_merged.mp4")
         
         # Check if webcam file exists
         if not os.path.exists(webcam_file):
@@ -96,7 +98,7 @@ def merge_videos():
         
         # Check if already merged
         if os.path.exists(output_file):
-            print(f"⏭ {prefix}_merged.webm (already exists)")
+            print(f"⏭ {prefix}_merged.mp4 (exists)")
             skipped_count += 1
             continue
         
