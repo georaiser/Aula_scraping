@@ -1,6 +1,10 @@
 downloaded_videos
 merged_videos
-scraped_data
+scraped_data/*
+!scraped_data/*/
+scraped_data/*/*
+!scraped_data/*/
+!scraped_data/*/session_*.json
 node_modules
 .env
 session_cookies.json
