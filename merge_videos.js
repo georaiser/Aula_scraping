@@ -26,10 +26,10 @@ async function mergeWithFFmpeg(deskFile, webcamFile, outputFile) {
         '-c:a', 'aac',
         outputFile
     ];
-    
+
     return new Promise((resolve) => {
         const ffmpeg = spawn('ffmpeg', args, { stdio: 'inherit' });
-        
+
         ffmpeg.on('close', (code) => {
             if (code === 0) {
                 console.log(`  ✓ Success`);
@@ -38,7 +38,7 @@ async function mergeWithFFmpeg(deskFile, webcamFile, outputFile) {
             }
             resolve();
         });
-        
+
         ffmpeg.on('error', (err) => {
             console.error(`  ✗ Failed to start FFmpeg: ${err.message}`);
             resolve();
@@ -48,11 +48,11 @@ async function mergeWithFFmpeg(deskFile, webcamFile, outputFile) {
 
 async function main() {
     console.log("Starting SENCE Video Merger...\n");
-    
+
     // Determine directories
     let inputDir = 'downloaded_videos';
     let outputDir = 'merged_videos';
-    
+
     const filter = process.env.BBB_FILTER;
     if (filter) {
         const safeName = sanitizeFilterName(filter);
@@ -61,40 +61,40 @@ async function main() {
         console.log(`Input:  ${inputDir}`);
         console.log(`Output: ${outputDir}\n`);
     }
-    
+
     if (!await fs.pathExists(inputDir)) {
         console.log(`✗ Error: Directory '${inputDir}' not found`);
         return;
     }
-    
+
     await fs.ensureDir(outputDir);
-    
+
     // Find deskshare files
-    const deskshareFiles = await glob(path.join(inputDir, '*_deskshare.webm'));
+    const deskshareFiles = await glob(path.join(inputDir, '*_deskshare.webm').replace(/\\/g, '/'));
     console.log(`Found ${deskshareFiles.length} recording sets\n`);
-    
+
     let skippedCount = 0;
-    
+
     for (const deskFile of deskshareFiles) {
         const prefix = path.basename(deskFile).replace('_deskshare.webm', '');
         const webcamFile = path.join(inputDir, `${prefix}_webcams.webm`);
         const outputFile = path.join(outputDir, `${prefix}_merged.mp4`);
-        
+
         if (!await fs.pathExists(webcamFile)) {
             console.log(`⏭ ${prefix}: Webcam file not found`);
             continue;
         }
-        
+
         if (await fs.pathExists(outputFile)) {
             console.log(`⏭ ${prefix}_merged.mp4 (exists)`);
             skippedCount++;
             continue;
         }
-        
+
         console.log(`🎬 ${prefix}...`);
         await mergeWithFFmpeg(deskFile, webcamFile, outputFile);
     }
-    
+
     console.log(`\n✓ Merge complete. Processed ${deskshareFiles.length} items.`);
     if (skippedCount > 0) {
         console.log(`  (Skipped ${skippedCount} existing files)`);
