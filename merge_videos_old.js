@@ -18,15 +18,12 @@ async function mergeWithFFmpeg(deskFile, webcamFile, outputFile) {
         '-v', 'quiet', '-stats',
         '-i', deskFile,
         '-i', webcamFile,
-        '-filter_complex', '[1]scale=iw/4:-2[pip];[0][pip]overlay=main_w-overlay_w-20:main_h-overlay_h-40',
+        '-filter_complex', '[1]scale=iw/5:-1[pip];[0][pip]overlay=main_w-overlay_w-20:main_h-overlay_h-40[merged];[merged]scale=1280:-2',
         '-map', '1:a',
         '-c:v', 'libx264',
-        '-preset', 'medium',
-        '-crf', '22',
-        '-pix_fmt', 'yuv420p',
+        '-preset', 'fast',
+        '-crf', '28',
         '-c:a', 'aac',
-        '-b:a', '128k',
-        '-movflags', '+faststart',
         outputFile
     ];
 
