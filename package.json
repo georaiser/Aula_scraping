@@ -8,7 +8,9 @@
     "scrape:session": "node session_scraper.js",
     "scrape:playback": "node playback_scraper.js",
     "download": "node download_videos.js",
-    "merge": "node merge_videos.js"
+    "merge": "node merge_videos.js",
+    "daemon": "node session_daemon.js",
+    "check:session": "node session_daemon.js --check"
   },
   "dependencies": {
     "axios": "^1.6.0",
